@@ -258,6 +258,52 @@ class Printable(Transform):
     echo = rx
 
 
+protocolState = 0
+class bipropellant(Transform):
+    """Highlight bipropellant protocol"""
+
+    def rx(self, text):
+        global protocolState
+        r = []
+        for c in text:
+            if '\x00' == c:
+                r.append('\r\n')
+                protocolState = 1
+            elif protocolState == 1:
+                r.append('ACK:')
+                if (int('10000000',2) & ord(c)) > 0:
+                    r.append('1')
+                else:
+                    r.append('0')
+                r.append(' CMD:')
+                c = chr(int('01111111',2) & ord(c))
+                r.append(c)
+                protocolState = 2
+            elif protocolState == 2:
+                r.append(' CI:')
+                r.append( str( ord(c) ).zfill(3) )
+                protocolState = 3
+            elif protocolState == 3:
+                r.append(' len:')
+                r.append( str( ord(c) ).zfill(3) )
+                protocolState += ord(c)
+                r.append(' COBS/R:')
+            elif protocolState == 4:
+                r.append(' ')
+                r.append( "{:02x}".format(ord(c)) )
+                protocolState = 0
+            elif protocolState > 4:
+                r.append(' ')
+                r.append( "{:02x}".format(ord(c)) )
+                protocolState -= 1
+            else:
+                r.append(' ERROR:')
+                r.append( "{:02x}".format(ord(c)) )
+        return ''.join(r)
+
+    echo = rx
+
+
 class Colorize(Transform):
     """Apply different colors for received and echo"""
 
@@ -302,6 +348,7 @@ TRANSFORMATIONS = {
     'default': NoTerminal,
     'nocontrol': NoControls,
     'printable': Printable,
+    'bipropellant': bipropellant,
     'colorize': Colorize,
     'debug': DebugIO,
 }
@@ -519,7 +566,7 @@ class Miniterm(object):
         elif c == '\x05':                       # CTRL+E -> toggle local echo
             self.echo = not self.echo
             sys.stderr.write('--- local echo {} ---\n'.format('active' if self.echo else 'inactive'))
-        elif c == '\x06':                       # CTRL+F -> edit filters
+        elif c == '\x07':                       # CTRL+G -> edit filters
             self.change_filter()
         elif c == '\x0c':                       # CTRL+L -> EOL mode
             modes = list(EOL_TRANSFORMATIONS)   # keys
@@ -756,7 +803,7 @@ class Miniterm(object):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # default args can be used to override when calling main() from an other script
 # e.g to create a miniterm-my-device.py
-def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr=None):
+def main(default_port=None, default_baudrate=115200, default_rts=None, default_dtr=None):
     """Command line tool, entry point"""
 
     import argparse
@@ -836,14 +883,14 @@ def main(default_port=None, default_baudrate=9600, default_rts=None, default_dtr
         dest='serial_port_encoding',
         metavar='CODEC',
         help='set the encoding for the serial port (e.g. hexlify, Latin1, UTF-8), default: %(default)s',
-        default='UTF-8')
+        default='Latin1')
 
     group.add_argument(
         '-f', '--filter',
         action='append',
         metavar='NAME',
         help='add text transformation',
-        default=[])
+        default=['bipropellant'])
 
     group.add_argument(
         '--eol',
